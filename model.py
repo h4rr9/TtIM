@@ -7,7 +7,7 @@ for a total of 8*8*8=512 new special tokens
 import torch
 import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers import GPTNeoForCausalLM, AutoTokenizer
+from transformers import GPTNeoForCausalLM
 from typing import Optional
 from enum import Enum
 
@@ -71,9 +71,9 @@ class Tim(GPTNeoForCausalLM):
         attention_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
         input_image_masks: Optional[torch.Tensor] = None,
+        use_cache: Optional[bool] = None
     ) -> CausalLMOutputWithPast:
         """Forward pass of model."""
-
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError(
                 "You cannot specify both input_ids \
@@ -98,6 +98,7 @@ class Tim(GPTNeoForCausalLM):
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             labels=labels,
+            use_cache=use_cache
         )
 
         return outputs
