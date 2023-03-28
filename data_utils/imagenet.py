@@ -5,46 +5,89 @@ import numpy as np
 import json
 from tqdm.auto import tqdm
 from multiprocessing import Pool
+import os
+import re
 
 from datasets import Dataset, DatasetDict, Features, Value, Array2D
 
 
-def _create_imagenet_dataset(imagenet_npz_file: str, simple_labels: str, split: str):
+shared_lookup_table = []
+
+
+def _init_worker(shared_lookup_table):
+    global lookup_table
+    lookup_table = shared_lookup_table
+
+
+def _apply(tuple_args):
+    global lookup_table
+    return [(data, lookup_table[int(label) - 1]) for (data, label) in zip(*tuple_args)]
+
+
+# taken from https://nedbatchelder.com/blog/200712/human_sorting.html
+def tryint(s):
+    """Return an int if possible, or unchanged."""
+    try:
+        return int(s)
+    except ValueError:
+        return s
+
+
+def alphanum_keys(s):
+    """Turn a string into a list of string and number chunks."""
+    return [tryint(c) for c in re.split("([0-9]+)", s)]
+
+
+def _create_imagenet_dataset(
+    imagenet_npz_folder: str, simple_labels_file: str, split: str
+):
     """Create imagenet dataset."""
-    batch_size = 1000
+    if not imagenet_npz_folder.endswith("/"):
+        imagenet_npz_folder += "/"
 
-    with np.load(imagenet_npz_file) as imagenet:
-        labels = imagenet["labels"]
-        data = imagenet["data"].reshape(-1, 1024, 3).astype(np.uint8)
+    with open(simple_labels_file, "r") as simple_labels_reader:
+        global shared_lookup_table
+        shared_lookup_table = json.load(simple_labels_reader)
 
-        n_batches = (
-            data.shape[0] // batch_size + 0 if data.shape[0] % batch_size == 0 else 1
-        )
+    batch_size = 100
+    for npz_file in sorted(os.listdir(imagenet_npz_folder), key=alphanum_keys):
+        if npz_file.endswith(".npz"):
+            batch_id = npz_file.split("_")[-1][:-4]
+            imagenet_npz_batch_file = imagenet_npz_folder + npz_file
+            with np.load(imagenet_npz_batch_file) as imagenet_batch:
+                labels = imagenet_batch["labels"]
+                data = imagenet_batch["data"].astype(np.uint8)
 
-        batched_label_data = (
-            labels[i : i + batch_size] for i in range(data.shape[0], step=batch_size)
-        )
+                data = np.dstack(
+                    [data[:, :1024], data[:, 1024:2048], data[:, 2048:3072]]
+                ).reshape(-1, 1024, 3)
 
-        batched_image_data = (
-            data[i : i + batch_size] for i in range(data.shape[0], step=batch_size)
-        )
+                assert (
+                    labels.shape[0] == data.shape[0]
+                ), "expected same number of data and label samples, got {data.shape[0]} and {labels.shape[0]}"
 
-        with open(simple_labels, "r") as simple_labels_file:
-            simple_labels = json.load(simple_labels_file)
+                n_batches = data.shape[0] // batch_size + (
+                    0 if data.shape[0] % batch_size == 0 else 1
+                )
 
-        def _apply(labels):
-            return [simple_labels[int(label)] for label in labels]
+                batched_data = (
+                    (data[i : i + batch_size], labels[i : i + batch_size])
+                    for i in range(0, data.shape[0], batch_size)
+                )
 
-        with Pool(processes=12) as pool:
-            with tqdm(
-                total=n_batches, desc=f"Creating Imagenet {split} dataset"
-            ) as p_bar:
-                for images, label_result in zip(
-                    batched_image_data, pool.imap(_apply, batched_label_data)
-                ):
-                    for image, simple_label in zip(images, label_result):
-                        p_bar.update()
-                        yield {"images": image, "captions": simple_label}
+                with Pool(
+                    processes=24,
+                    initializer=_init_worker,
+                    initargs=(shared_lookup_table,),
+                ) as pool:
+                    with tqdm(
+                        total=n_batches,
+                        desc=f"Creating Imagenet {split} dataset from batch {batch_id}",
+                    ) as p_bar:
+                        for result in pool.imap_unordered(_apply, batched_data):
+                            p_bar.update()
+                            for image, simple_label in result:
+                                yield {"images": image, "captions": simple_label}
 
 
 if __name__ == "__main__":
@@ -56,8 +99,8 @@ if __name__ == "__main__":
         generator=_create_imagenet_dataset,
         features=features,
         gen_kwargs={
-            "imagenet_npz_file": "./data/imagenet/Imagenet32_train_npz/train_data.npz",
-            "simple_labels": "./data/imagenet/imagenet-simple-labels.json",
+            "imagenet_npz_folder": "./data/imagenet/Imagenet32_train_npz/",
+            "simple_labels_file": "./data/imagenet/imagenet-simple-labels-fixed.json",
             "split": "train",
         },
     )
@@ -65,8 +108,8 @@ if __name__ == "__main__":
         generator=_create_imagenet_dataset,
         features=features,
         gen_kwargs={
-            "imagenet_npz_file": "./data/imagenet/Imagenet32_val_npz/val_data.npz",
-            "simple_labels": "./data/imagenet/imagenet-simple-labels.json",
+            "imagenet_npz_folder": "./data/imagenet/Imagenet32_val_npz/",
+            "simple_labels_file": "./data/imagenet/imagenet-simple-labels-fixed.json",
             "split": "validation",
         },
     )
