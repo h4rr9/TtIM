@@ -84,7 +84,7 @@ def tim_factory(CausalModel: PreTrainedModel):
 
             self.init_weights()
 
-        def prepare_input(
+        def prepare_inputs(
             self,
             input_ids: Optional[torch.Tensor] = None,
             inputs_embeds: Optional[torch.Tensor] = None,
@@ -118,60 +118,16 @@ def tim_factory(CausalModel: PreTrainedModel):
                     )
             return (input_ids, inputs_embeds)
 
-        def forward(
-            self,
-            input_ids: Optional[torch.Tensor] = None,
-            inputs_embeds: Optional[torch.Tensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            labels: Optional[torch.Tensor] = None,
-            input_image_masks: Optional[torch.Tensor] = None,
-            use_cache: Optional[bool] = None,
-            **kwargs
-        ) -> CausalLMOutputWithPast:
-            """Forward pass of model."""
-            input_ids, inputs_embeds = self.prepare_input(
-                input_ids=input_ids,
-                inputs_embeds=inputs_embeds,
-                input_image_masks=input_image_masks,
-            )
 
-            # compute transformer outputs
-            outputs = super().forward(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                labels=labels,
-                use_cache=use_cache,
-                **kwargs
-            )
-
-            return outputs
-
-        @torch.no_grad()
-        def generate(
-            self,
-            input_ids: Optional[torch.Tensor] = None,
-            inputs_embeds: Optional[torch.Tensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            input_image_masks: Optional[torch.Tensor] = None,
-            use_cache: Optional[bool] = None,
-            **kwargs
+        def prepare_input(
+                self,
+                input_ids: Optional[torch.Tensor] = None,
+                inputs_embeds: Optional[torch.Tensor] = None,
+                input_image_masks: Optional[torch.Tensor] = None,
         ):
-            """Generate text from prompt."""
-            input_ids, inputs_embeds = self.prepare_input(
-                input_ids=input_ids,
-                inputs_embeds=inputs_embeds,
-                input_image_masks=input_image_masks,
-            )
 
-            outputs = super().generate(
-                input_ids=input_ids,
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                use_cache=use_cache,
-                **kwargs
-            )
 
-            return outputs
+
 
     return Tim
 
