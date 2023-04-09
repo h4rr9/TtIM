@@ -15,6 +15,7 @@ import random
 
 # from itertools import chain
 # from pathlib import Path
+import numpy as np
 
 
 import datasets
@@ -23,16 +24,20 @@ from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 
-# from datasets import load_dataset
+from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+
+
+from utils import prepare_tokenizer, get_custom_collater
+from model import Tim
 
 
 import transformers
 from transformers import (
     # AutoConfig,
     # AutoModelForCausalLM,
-    # AutoTokenizer,
+    AutoTokenizer,
     SchedulerType,
     default_data_collator,
     get_scheduler,
@@ -58,14 +63,17 @@ def parse_args():
         description="Finetune a transformers model ona causal language modeling task."
     )
     parser.add_argument(
-        "--datasets", nargs="+", default=[], help="The name of the dataset to use."
+        "--dataset_name",
+        type=str,
+        required=True,
+        help="The name of the dataset to use.",
     )
 
     parser.add_argument(
         "--model_name_or_path",
         type=str,
         help="Path to pretrained model.",
-        required=False,
+        required=True,
     )
 
     parser.add_argument(
@@ -235,38 +243,40 @@ def main():
     accelerator.wait_for_everyone()
 
     # TODO load/create dataset objects
-    train_dataset = None
-    validation_dataset = None
+    raw_dataset = load_dataset(args.dataset_name)
+
+    train_dataset = raw_dataset["train"]
+    validation_dataset = raw_dataset["validation"]
 
     # TODO load/initialize model
     if args.model_name_or_path:
-        model = None
+        model = Tim.from_pretrained(args.model_name_or_path)
     else:
         # REVIEW initialize from config??
-        model = None
+        raise ValueError("Specify the model_name or path")
 
     # TODO load/initialize tokenizer
-    tokenizer = None
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    tokenizer = prepare_tokenizer(tokenizer)
 
-    embedding_size = model.get_input_embedding().weight.shape[0]
+    embedding_size = model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         model.resize_token_embeddings(len(tokenizer))
-
-    # TODO process dataset (tokenize, etc)
 
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}")
 
     # Dataloaders
+    rng = np.random.default_rng()
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=default_data_collator,
+        collate_fn=get_custom_collater(tokenizer=tokenizer, rng=rng),
         batch_size=args.per_device_train_batch_size,
     )
     eval_dataloader = DataLoader(
         validation_dataset,
-        collate_fn=default_data_collator,
+        collate_fn=get_custom_collater(tokenizer=tokenizer, rng=rng),
         batch_size=args.per_device_eval_batch_size,
     )
 
@@ -361,10 +371,10 @@ def main():
         f"  Instantaneous batch size per device = {args.per_device_train_batch_size}"
     )
     logger.info(
-        f"  Totoal train batch size (w. parallel, distribyted & accumualtion) = {total_batch_size}"
+        f"  Total train batch size (w. parallel, distribyted & accumualtion) = {total_batch_size}"
     )
-    logger.info("f  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
-    logger.info("f  Total optimization steps = {args.max_trai_steps}")
+    logger.info(f"Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    logger.info(f"Total optimization steps = {args.max_train_steps}")
     # Only show the progress bar once on each machine
     progress_bar = tqdm(
         range(args.max_train_steps), disable=not accelerator.is_local_main_process
@@ -398,108 +408,135 @@ def main():
             resume_step -= starting_epoch * len(train_dataloader)
 
         # update progress bar
-        progress_bar.update(starting_epoch * num_update_steps_per_epoch)
-        completed_steps = starting_epoch * num_update_steps_per_epoch
+    progress_bar.update(starting_epoch * num_update_steps_per_epoch)
+    completed_steps = starting_epoch * num_update_steps_per_epoch
 
-        for epoch in range(starting_epoch, args.num_train_epochs):
-            model.train()
+    for epoch in range(starting_epoch, args.num_train_epochs):
+        model.train()
 
-            if args.with_tracking:
-                total_loss = 0
+        if args.with_tracking:
+            total_loss = 0
 
-                for step, batch in enumerate(train_dataloader):
-                    # Skip till resumed steps
-                    if args.resume_from_checkpoint and epoch == starting_epoch:
-                        if resume_step is not None and step < resume_step:
-                            if step % args.gradient_accumualtion_steps == 0:
-                                progress_bar.update(1)
-                                completed_steps += 1
-                            continue
-                    with accelerator.accumulate(model):
-                        outputs = model(**batch)
-                        loss = outputs.loss
-
-                        if args.with_tracking:
-                            total_loss += loss.detach().float()
-                        accelerator.backward(loss)
-                        optimizer.step()
-                        lr_scheduler.step()
-                        optimizer.zero_grad()
-
-                    if accelerator.sync_gradients:
+        for step, batch in enumerate(train_dataloader):
+            # Skip till resumed steps
+            if args.resume_from_checkpoint and epoch == starting_epoch:
+                if resume_step is not None and step < resume_step:
+                    if step % args.gradient_accumualtion_steps == 0:
                         progress_bar.update(1)
                         completed_steps += 1
+                    continue
+            with accelerator.accumulate(model):
+                # index required fields
+                input_ids = batch["input_ids"]
+                attention_mask = batch["attention_mask"]
+                image_masks = batch["image_masks"]
 
-                    if isinstance(checkpointing_steps, int):
-                        if completed_steps % checkpointing_steps == 0:
-                            output_dir = f"step_{completed_steps}"
-                            if args.output_dir is not None:
-                                output_dir = os.path.join(args.output_dir, output_dir)
-                            accelerator.save_state(output_dir)
-                    if completed_steps >= args.max_trai_steps:
-                        break
-
-                model.eval()
-                losses = []
-                for step, batch in enumerate(eval_dataloader):
-                    with torch.no_grad():
-                        outputs = model(**batch)
-
-                    loss = outputs.loss
-                    losses.append(
-                        accelerator.gether_for_metrics(
-                            loss.repeat(args.per_device_eval_batch_size)
-                        )
-                    )
-
-                losses = torch.cat(losses)
-                try:
-                    eval_loss = torch.mean(losses)
-                    perplexity = math.exp(eval_loss)
-                except OverflowError:
-                    perplexity = float("inf")
-
-                logger.info(
-                    f"epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}"
+                # add image positional embeddings to input_ids
+                inputs_embeds = model.prepare_inputs(
+                    input_ids=input_ids, image_masks=image_masks
                 )
 
-                if args.with_tracking:
-                    accelerator.log(
-                        {
-                            "perplexity": perplexity,
-                            "eval_loss": eval_loss,
-                            "train_loss": total_loss.item() / len(train_dataloader),
-                            "epoch": epoch,
-                            "step": completed_steps,
-                        },
-                        step=completed_steps,
-                    )
+                # compute autoregressive loss
+                outputs = model(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=attention_mask,
+                    labels=input_ids,
+                )
+                loss = outputs.loss
 
-                if args.checkpointing_steps == "epoch":
-                    output_dir = f"epoch_{epoch}"
+                if args.with_tracking:
+                    total_loss += loss.detach().float()
+                accelerator.backward(loss)
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+
+            if accelerator.sync_gradients:
+                progress_bar.update(1)
+                completed_steps += 1
+
+            if isinstance(checkpointing_steps, int):
+                if completed_steps % checkpointing_steps == 0:
+                    output_dir = f"step_{completed_steps}"
                     if args.output_dir is not None:
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
+            if completed_steps >= args.max_train_steps:
+                break
 
-            if args.with_tracking:
-                accelerator.end_training()
+        model.eval()
+        losses = []
+        for step, batch in enumerate(eval_dataloader):
+            with torch.no_grad():
+                # index required fields
+                input_ids = batch["input_ids"]
+                attention_mask = batch["attention_mask"]
+                image_masks = batch["image_masks"]
 
-                if args.output_dir is not None:
-                    accelerator.wait_for_everyone()
-                    unwrapped_model = accelerator.unwrap_model(model)
-                    unwrapped_model.save_pretrained(
-                        args.output_dir,
-                        is_main_process=accelerator.is_main_process,
-                        save_function=accelerator.save,
-                    )
+                # add image positional embeddings to input_ids
+                inputs_embeds = model.prepare_inputs(
+                    input_ids=input_ids, image_masks=image_masks
+                )
 
-                    if accelerator.is_main_process:
-                        tokenizer.save_pretrained(args.output_dir)
+                # compute autoregressive loss
+                outputs = model(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=attention_mask,
+                    labels=input_ids,
+                )
+                outputs = model(**batch)
 
-                        with open(
-                            os.path.join(args.output_dir, "all_results.json"), "w"
-                        ) as f:
-                            json.dump({"perplexity": perplexity}, f)
+            loss = outputs.loss
+            losses.append(
+                accelerator.gether_for_metrics(
+                    loss.repeat(args.per_device_eval_batch_size)
+                )
+            )
+
+        losses = torch.cat(losses)
+        try:
+            eval_loss = torch.mean(losses)
+            perplexity = math.exp(eval_loss)
+        except OverflowError:
+            perplexity = float("inf")
+
+        logger.info(f"epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}")
+
+        if args.with_tracking:
+            accelerator.log(
+                {
+                    "perplexity": perplexity,
+                    "eval_loss": eval_loss,
+                    "train_loss": total_loss.item() / len(train_dataloader),
+                    "epoch": epoch,
+                    "step": completed_steps,
+                },
+                step=completed_steps,
+            )
+
+        if args.checkpointing_steps == "epoch":
+            output_dir = f"epoch_{epoch}"
+            if args.output_dir is not None:
+                output_dir = os.path.join(args.output_dir, output_dir)
+            accelerator.save_state(output_dir)
+
+    if args.with_tracking:
+        accelerator.end_training()
+
+    if args.output_dir is not None:
+        accelerator.wait_for_everyone()
+        unwrapped_model = accelerator.unwrap_model(model)
+        unwrapped_model.save_pretrained(
+            args.output_dir,
+            is_main_process=accelerator.is_main_process,
+            save_function=accelerator.save,
+        )
+
+        if accelerator.is_main_process:
+            tokenizer.save_pretrained(args.output_dir)
+
+            with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
+                json.dump({"perplexity": perplexity}, f)
 
 
 if __name__ == "__main__":
