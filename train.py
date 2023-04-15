@@ -432,7 +432,7 @@ def main():
             dirs.sort(key=os.path.getctime)
             path = dirs[-1]  # sorts by date modified, most recent is last
         # Extract `epoch_{i}` or `step_{i}`
-        training_difference = os.path.splittext(path)[0]
+        training_difference = os.path.splitext(path)[0]
 
         if "epoch" in training_difference:
             starting_epoch = int(training_difference.replace("epoch_", "")) + 1
