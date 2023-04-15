@@ -38,21 +38,11 @@ class Tim(OPTForCausalLM):
         # OPT uses init_std instead of initializer_range
         init_std = config.init_std
         self.pe_type = pe_type
-        if self.pe_type == PE_TYPES.RWKV:
-            # positional embeddings of size (num_pixels x embed)
-            self.pe_x: nn.Parameter = nn.Parameter(
-                torch.randn(1, IMAGE_SIZE, embed_size)
-            )
-            self.pe_y: nn.Parameter = nn.Parameter(
-                torch.randn(IMAGE_SIZE, 1, embed_size)
-            )
-            self.pe_x.data.normal_(mean=0.0, std=init_std)
-            self.pe_y.data.normal_(mean=0.0, std=init_std)
-        elif pe_type == PE_TYPES.VIT:
-            self.pe: nn.Parameter = nn.Parameter(
-                torch.randn(IMAGE_SIZE * IMAGE_SIZE, embed_size)
-            )
-            self.pe.data.normal_(mean=0.0, std=init_std)
+        # positional embeddings of size (num_pixels x embed)
+        self.pe_x: nn.Parameter = nn.Parameter(torch.randn(1, IMAGE_SIZE, embed_size))
+        self.pe_y: nn.Parameter = nn.Parameter(torch.randn(IMAGE_SIZE, 1, embed_size))
+        self.pe_x.data.normal_(mean=0.0, std=init_std)
+        self.pe_y.data.normal_(mean=0.0, std=init_std)
 
         self.init_weights()
 
@@ -82,23 +72,20 @@ class Tim(OPTForCausalLM):
             )
             # add image positional embeddings
 
-            if self.pe_type == PE_TYPES.VIT:
-                image_embeddings += self.pe
-            else:
-                image_embeddings += (self.pe_x + self.pe_y).view(
-                    IMAGE_SIZE * IMAGE_SIZE, self.config.hidden_size
-                )
+            image_embeddings += (self.pe_x + self.pe_y).view(
+                IMAGE_SIZE * IMAGE_SIZE, self.config.hidden_size
+            )
         return inputs_embeds
 
 
 if __name__ == "__main__":
-    model = Tim.from_pretrained("facebook/opt-125m", PE_TYPES.RWKV)
+    model = Tim.from_pretrained("facebook/opt-125m")
 
     x = model.pe_x.sum()
 
     model.save_pretrained("test_opt_model")
 
-    model = Tim.from_pretrained("test_opt_model", PE_TYPES.RWKV)
+    model = Tim.from_pretrained("test_opt_model")
 
     y = model.pe_x.sum()
 

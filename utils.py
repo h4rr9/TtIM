@@ -14,13 +14,11 @@ from datasets import load_dataset
 
 IMAGE_DIM = 32
 IMAGE_LEN = IMAGE_DIM * IMAGE_DIM
-NUM_COLORS = 512
 
 
 InputDataClass = NewType("InputDataClass", Any)
 
 
-PIXEL_TOKENS = [f"[{i:0>3}]" for i in range(NUM_COLORS)]
 IMAGE_TOKEN = "[Image]"
 IMAGE_FIRST_TOKEN = "[ImageFirst]"
 TEXT_TOKEN = "[Text]"
@@ -100,9 +98,24 @@ def get_custom_collater(
     return _collater
 
 
-def prepare_tokenizer(tokenizer: Tokenizer) -> Tokenizer:
+def prepare_tokenizer(tokenizer: Tokenizer, args) -> Tokenizer:
     """Prepare tokenizer."""
-    tokenizer.add_tokens(PIXEL_TOKENS)
+    if args.dataset_name.endswith("_2_bit"):
+        num_colors = 2
+        zero_fill = 0
+    elif args.dataset_name.endswith("_9_bit"):
+        num_colors = 512
+        zero_fill = 3
+    elif args.dataset_name.endswith("_12_bit"):
+        num_colors = 4098
+        zero_fill = 4
+    else:
+        raise ValueError(
+            "Dataset expected to end with _2_bit, _9_bit, or _12_bit, got {args.dataset_name}"
+        )
+
+    pixel_tokens = ["[" + str(i).zfill(zero_fill) + "]" for i in range(num_colors)]
+    tokenizer.add_tokens(pixel_tokens)
     tokenizer.add_tokens([IMAGE_FIRST_TOKEN, TEXT_FIRST_TOKEN, IMAGE_TOKEN, TEXT_TOKEN])
     return tokenizer
 

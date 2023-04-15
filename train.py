@@ -14,7 +14,7 @@ import json
 import random
 
 # from itertools import chain
-# from pathlib import Path
+from pathlib import Path
 import numpy as np
 
 
@@ -39,13 +39,14 @@ from transformers import (
     # AutoModelForCausalLM,
     AutoTokenizer,
     SchedulerType,
-    default_data_collator,
+    # default_data_collator,
     get_scheduler,
 )
-from transformers.utils import (
-    check_min_version,
-)
+from transformers.utils import check_min_version, get_full_repo_name
 from transformers.utils.versions import require_version
+
+
+from huggingface_hub import Repository, create_repo
 
 
 # Will error if the minimal version of Transformers is not installed.
@@ -165,7 +166,7 @@ def parse_args():
         type=str,
         default=None,
         help=(
-            "Whether the various states shoudl be saved at the end of every n steps"
+            "Whether the various states should be saved at the end of every n steps"
             "or 'epoch' for each epoch."
         ),
     )
@@ -200,8 +201,22 @@ def parse_args():
         default="TTIM",
         help=("The name of the experiment for easier tracking"),
     )
+    parser.add_argument(
+        "--push_to_hub", action="store_true", help="Whether or not to push to hub."
+    )
+    parser.add_argument(
+        "--hub_model_id",
+        type=str,
+        help="The name of the repository to keep in sync with `output_dir`.",
+    )
+    parser.add_argument("--hub_token", type=str, help="token to push model to hub.")
 
     args = parser.parse_args()
+
+    if args.push_to_hub:
+        assert (
+            args.output_dir is not None
+        ), "Need an `output_dir` to create a repo when `--push_to_hub` is passed."
 
     return args
 
@@ -240,6 +255,28 @@ def main():
     if args.seed is not None:
         set_seed(args.seed)
 
+    # handle repository creation
+    if accelerator.is_main_process:
+        if args.push_to_hub:
+            if args.hub_model_id is None:
+                repo_name = get_full_repo_name(
+                    Path(args.output_dir).name, token=args.hub_token
+                )
+            else:
+                repo_name = args.hub_model_id
+            create_repo(repo_name, exist_ok=True, token=args.hub_token)
+            repo = Repository(
+                args.output_dir, clone_from=repo_name, token=args.hub_token
+            )
+
+            with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
+                if "step_*" not in gitignore:
+                    gitignore.write("step_*\n")
+                if "epoch_*" not in gitignore:
+                    gitignore.write("epoch_*\n")
+        elif args.output_dir is not None:
+            os.makedirs(args.output_dir, exist_ok=True)
+
     accelerator.wait_for_everyone()
 
     # TODO load/create dataset objects
@@ -256,12 +293,13 @@ def main():
         raise ValueError("Specify the model_name or path")
 
     # TODO load/initialize tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-    tokenizer = prepare_tokenizer(tokenizer)
+    if args.model_name_or_path:
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+        tokenizer = prepare_tokenizer(tokenizer, args)
 
-    embedding_size = model.get_input_embeddings().weight.shape[0]
-    if len(tokenizer) > embedding_size:
-        model.resize_token_embeddings(len(tokenizer))
+        embedding_size = model.get_input_embeddings().weight.shape[0]
+        if len(tokenizer) > embedding_size:
+            model.resize_token_embeddings(len(tokenizer))
 
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}")
@@ -484,11 +522,10 @@ def main():
                     attention_mask=attention_mask,
                     labels=input_ids,
                 )
-                outputs = model(**batch)
 
             loss = outputs.loss
             losses.append(
-                accelerator.gether_for_metrics(
+                accelerator.gather_for_metrics(
                     loss.repeat(args.per_device_eval_batch_size)
                 )
             )
@@ -514,6 +551,22 @@ def main():
                 step=completed_steps,
             )
 
+        if args.push_to_hub and epoch < args.num_train_epochs - 1:
+            accelerator.wait_for_everyone()
+            unwrapped_model = accelerator.unwrap_model(model)
+            unwrapped_model.save_pretrained(
+                args.output_dir,
+                is_main_process=accelerator.is_main_process,
+                save_function=accelerator.save,
+            )
+            if accelerator.is_main_process:
+                tokenizer.save_pretrained(args.output_dir)
+                repo.push_to_hub(
+                    commit_message=f"Training in progress epoch {epoch}",
+                    blocking=False,
+                    auto_lfs_prune=True,
+                )
+
         if args.checkpointing_steps == "epoch":
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
@@ -534,6 +587,8 @@ def main():
 
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
+            if args.push_to_hub:
+                repo.push_to_hub(commit_message="End of Training", auto_lfs_prune=True)
 
             with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
                 json.dump({"perplexity": perplexity}, f)
