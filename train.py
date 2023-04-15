@@ -392,8 +392,7 @@ def main():
         experiment_config["lr_scheduler_type"] = experiment_config[
             "lr_scheduler_type"
         ].value
-        init_config = {"wandb": {"name": args.output_dir}}
-        accelerator.init_trackers(args.experiment, experiment_config, init_config)
+        accelerator.init_trackers(args.experiment, experiment_config)
 
     # Train
 
