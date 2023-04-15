@@ -122,7 +122,7 @@ def parse_args():
     parser.add_argument(
         "--lr_scheduler_type",
         type=SchedulerType,
-        default="cosine",
+        default="linear",
         help="The scheduler type to use",
         choices=[
             "linear",
@@ -137,7 +137,7 @@ def parse_args():
     parser.add_argument(
         "--num_warmup_steps",
         type=int,
-        default=1,
+        default=0,
         help="Number of steps for the warmup in the lr scheduler.",
     )
 
