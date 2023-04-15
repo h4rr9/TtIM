@@ -137,7 +137,7 @@ def parse_args():
     parser.add_argument(
         "--num_warmup_steps",
         type=int,
-        default=1,
+        default=0,
         help="Number of steps for the warmup in the lr scheduler.",
     )
 
@@ -392,7 +392,8 @@ def main():
         experiment_config["lr_scheduler_type"] = experiment_config[
             "lr_scheduler_type"
         ].value
-        accelerator.init_trackers(args.experiment, experiment_config)
+        init_config = {"wandb": {"name": args.output_dir}}
+        accelerator.init_trackers(args.experiment, experiment_config, init_config)
 
     # Train
 
