@@ -94,7 +94,7 @@ def parse_args():
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=5e-5,
+        default=3e-3,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
 
@@ -122,7 +122,7 @@ def parse_args():
     parser.add_argument(
         "--lr_scheduler_type",
         type=SchedulerType,
-        default="linear",
+        default="cosine",
         help="The scheduler type to use",
         choices=[
             "linear",
@@ -137,7 +137,7 @@ def parse_args():
     parser.add_argument(
         "--num_warmup_steps",
         type=int,
-        default=0,
+        default=1,
         help="Number of steps for the warmup in the lr scheduler.",
     )
 
