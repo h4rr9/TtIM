@@ -100,7 +100,7 @@ def get_custom_collater(
 
 def prepare_tokenizer(tokenizer: Tokenizer, args) -> Tokenizer:
     """Prepare tokenizer."""
-    if args.dataset_name.endswith("_2_bit"):
+    if args.dataset_name.endswith("_1_bit"):
         num_colors = 2
         zero_fill = 0
     elif args.dataset_name.endswith("_9_bit"):
@@ -111,7 +111,7 @@ def prepare_tokenizer(tokenizer: Tokenizer, args) -> Tokenizer:
         zero_fill = 4
     else:
         raise ValueError(
-            "Dataset expected to end with _2_bit, _9_bit, or _12_bit, got {args.dataset_name}"
+            f"Dataset expected to end with _1_bit, _9_bit, or _12_bit, got {args.dataset_name}"
         )
 
     pixel_tokens = ["[" + str(i).zfill(zero_fill) + "]" for i in range(num_colors)]

@@ -94,7 +94,7 @@ def parse_args():
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=3e-3,
+        default=1e-3,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
 
@@ -486,6 +486,9 @@ def main():
                     total_loss += loss.detach().float()
                     assert not math.isnan(total_loss)
                 accelerator.backward(loss)
+
+                # accelerator.clip_grad_norm_(model.parameters(), args.clip)
+
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
