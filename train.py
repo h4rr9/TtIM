@@ -538,14 +538,17 @@ def main():
         except OverflowError:
             perplexity = float("inf")
 
-        logger.info(f"epoch {epoch}: train_loss: {} perplexity: {perplexity} eval_loss: {eval_loss}")
+        train_loss = total_loss.item() / len(train_dataloader)
+        logger.info(
+            f"epoch {epoch}: train_loss: {train_loss} perplexity: {perplexity} eval_loss: {eval_loss}"
+        )
 
         if args.with_tracking:
             accelerator.log(
                 {
                     "perplexity": perplexity,
                     "eval_loss": eval_loss,
-                    "train_loss": total_loss.item() / len(train_dataloader),
+                    "train_loss": train_loss,
                     "epoch": epoch,
                     "step": completed_steps,
                 },
