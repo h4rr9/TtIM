@@ -484,6 +484,7 @@ def main():
 
                 if args.with_tracking:
                     total_loss += loss.detach().float()
+                    assert not math.isnan(total_loss)
                 accelerator.backward(loss)
                 optimizer.step()
                 lr_scheduler.step()
@@ -537,7 +538,7 @@ def main():
         except OverflowError:
             perplexity = float("inf")
 
-        logger.info(f"epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}")
+        logger.info(f"epoch {epoch}: train_loss: {} perplexity: {perplexity} eval_loss: {eval_loss}")
 
         if args.with_tracking:
             accelerator.log(
