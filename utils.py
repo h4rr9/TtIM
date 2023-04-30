@@ -55,7 +55,7 @@ def get_custom_collater(
 
         batch_size = len(features)
 
-        coins = np.zeros(size=batch_size, dtype=bool)
+        coins = np.zeros(shape=batch_size, dtype=bool)
         coins[: int(p * len(batch_size))] = True
         np.random.shuffle(coins)
 
