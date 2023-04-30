@@ -53,12 +53,18 @@ def get_custom_collater(
         prompts, image_masks = [], []
         image_start_positions = []
 
+        batch_size = len(features)
+
+        coins = np.zeros(size=batch_size, dtype=bool)
+        coins[: int(p * len(batch_size))] = True
+        np.random.shuffle(coins)
+
         batch_images = [b["palette_images"] for b in features]
         batch_captions = [b["captions"] for b in features]
 
         kinds = []
-        for image, captions in zip(batch_images, batch_captions):
-            coin_toss = rng.random() > (1.0 - p)
+        for coin_toss, image, captions in zip(coins, batch_images, batch_captions):
+            # coin_toss = rng.random() > (1.0 - p)
 
             caption = captions if type(captions) is str else rng.choice(captions)
 
@@ -71,7 +77,7 @@ def get_custom_collater(
             image_start_position = (
                 3
                 + len(
-                    tokenizer.tokenize(caption)
+                    tokenizer.tokenize(caption)  # does not count </s>
                 )  # 3 corresponds to </s> and [TextFirst] and [Image]
                 if coin_toss
                 else 2  # 2 corresconds to </s> and [ImageFirst]

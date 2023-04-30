@@ -39,10 +39,14 @@ class Tim(OPTForCausalLM):
         init_std = config.init_std
         self.pe_type = pe_type
         # positional embeddings of size (num_pixels x embed)
-        self.pe_x: nn.Parameter = nn.Parameter(torch.randn(1, IMAGE_SIZE, embed_size))
-        self.pe_y: nn.Parameter = nn.Parameter(torch.randn(IMAGE_SIZE, 1, embed_size))
-        self.pe_x.data.normal_(mean=0.0, std=init_std)
-        self.pe_y.data.normal_(mean=0.0, std=init_std)
+        # self.pe_x: nn.Parameter = nn.Parameter(torch.randn(1, IMAGE_SIZE, embed_size))
+        # self.pe_y: nn.Parameter = nn.Parameter(torch.randn(IMAGE_SIZE, 1, embed_size))
+        # self.pe_x.data.normal_(mean=0.0, std=init_std)
+        # self.pe_y.data.normal_(mean=0.0, std=init_std)
+        self.pe = nn.Parameter = nn.Parameter(
+            torch.randn(IMAGE_SIZE * IMAGE_SIZE, embed_size)
+        )
+        self.pe.data.normal_(mean=0.0, std=init_std)
 
         self.init_weights()
 
@@ -72,9 +76,10 @@ class Tim(OPTForCausalLM):
             )
             # add image positional embeddings
 
-            image_embeddings += (self.pe_x + self.pe_y).view(
-                IMAGE_SIZE * IMAGE_SIZE, self.config.hidden_size
-            )
+            # image_embeddings += (self.pe_x + self.pe_y).view(
+            #     IMAGE_SIZE * IMAGE_SIZE, self.config.hidden_size
+            # )
+            image_embeddings += self.pe
         return inputs_embeds
 
 
