@@ -43,7 +43,7 @@ class Tim(OPTForCausalLM):
         # self.pe_y: nn.Parameter = nn.Parameter(torch.randn(IMAGE_SIZE, 1, embed_size))
         # self.pe_x.data.normal_(mean=0.0, std=init_std)
         # self.pe_y.data.normal_(mean=0.0, std=init_std)
-        self.pe = nn.Parameter = nn.Parameter(
+        self.pe: nn.Parameter = nn.Parameter(
             torch.randn(IMAGE_SIZE * IMAGE_SIZE, embed_size)
         )
         self.pe.data.normal_(mean=0.0, std=init_std)
